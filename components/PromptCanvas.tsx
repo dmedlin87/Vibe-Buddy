@@ -11,7 +11,8 @@ export const PromptCanvas: React.FC = () => {
     contextMode, setContextMode, generatedPrompt, 
     savedPrompts, suggestedTemplates, savePrompt, updatePrompt, deletePrompt,
     generateSuggestions, saveSuggestedTemplate, isProcessing,
-    sendMessage, agentActivity, addToast, rootNode, isSidebarOpen
+    sendMessage, agentActivity, addToast, rootNode, isSidebarOpen,
+    smartSelectFiles, autoRefineInstruction, clearSelection
   } = useStore();
   
   const [copied, setCopied] = useState(false);
@@ -30,8 +31,10 @@ export const PromptCanvas: React.FC = () => {
   const [newPromptTags, setNewPromptTags] = useState('');
 
   const handleCopy = () => {
+     if (!generatedPrompt) return;
      navigator.clipboard.writeText(generatedPrompt);
      setCopied(true);
+     addToast('Prompt copied to clipboard', 'success');
      setTimeout(() => setCopied(false), 2000);
   };
 
@@ -52,9 +55,23 @@ export const PromptCanvas: React.FC = () => {
     setShowSaveModal(false);
   };
 
-  const handleRefine = () => {
+  const handleRefine = async () => {
     if (!userInstruction.trim()) return;
-    sendMessage(`Please refine the following instruction to be more precise, clear, and effective for an AI coding agent:\n\n${userInstruction}`);
+    await autoRefineInstruction();
+  };
+
+  const handleSmartSelect = async () => {
+    if (!userInstruction.trim()) {
+      addToast('Add an instruction so I can smart-select files', 'info');
+      return;
+    }
+    await smartSelectFiles(userInstruction);
+  };
+
+  const handleClearSelection = () => {
+    if (selectedPaths.size === 0) return;
+    clearSelection();
+    addToast('Context stack cleared', 'info');
   };
 
   const handleClearInstruction = () => {
@@ -159,8 +176,8 @@ export const PromptCanvas: React.FC = () => {
   return (
     <div className="flex flex-col h-full relative bg-zinc-950">
       {/* Canvas Header */}
-      <div className={`h-14 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between shrink-0 backdrop-blur-sm z-10 transition-all duration-300 ${!isSidebarOpen ? 'pl-14 pr-6' : 'px-6'}`}>
-         <div className="flex gap-6">
+      <div className={`h-14 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between gap-4 shrink-0 backdrop-blur-sm z-10 transition-all duration-300 ${!isSidebarOpen ? 'pl-14 pr-6' : 'px-6'}`}>
+            <div className="flex gap-6">
             <button 
               onClick={() => setActiveTab('canvas')} 
               className={`text-sm font-medium h-14 border-b-2 transition-all flex items-center gap-2 ${activeTab === 'canvas' ? 'text-indigo-400 border-indigo-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
@@ -191,6 +208,20 @@ export const PromptCanvas: React.FC = () => {
                {copied ? <Check size={14}/> : <Copy size={14}/>}
                {copied ? 'Copied' : 'Copy Prompt'}
             </button>
+         )}
+
+         {/* Global quick copy button for other tabs */}
+         {activeTab !== 'preview' && (
+           <button
+             onClick={handleCopy}
+             disabled={!generatedPrompt}
+             className="flex items-center gap-2 text-[11px] font-semibold bg-zinc-900 border border-zinc-800 text-zinc-300 px-3 py-1.5 rounded-lg transition-all hover:border-indigo-500/40 hover:text-white hover:bg-zinc-800/80 disabled:opacity-50 disabled:cursor-not-allowed"
+             aria-label="Copy generated prompt"
+             title={generatedPrompt ? 'Copy current prompt output' : 'Generate a prompt to copy'}
+           >
+             {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+             {copied ? 'Copied' : 'Copy Prompt'}
+           </button>
          )}
 
          {activeTab === 'library' && (
@@ -226,7 +257,8 @@ export const PromptCanvas: React.FC = () => {
                  </h3>
                  
                  {/* Context Mode Toggle */}
-                 <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800/50 gap-1 w-full sm:w-auto shadow-sm">
+                 <div className="flex flex-wrap items-center gap-2 justify-end w-full sm:w-auto">
+                    <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800/50 gap-1 shadow-sm">
                     <button 
                         onClick={() => setContextMode('reference')} 
                         className={`
@@ -251,6 +283,25 @@ export const PromptCanvas: React.FC = () => {
                     >
                         <Braces size={12} strokeWidth={2.5} /> Embed
                     </button>
+                    </div>
+                    {rootNode && (
+                      <>
+                        <button
+                          onClick={handleSmartSelect}
+                          disabled={isProcessing || !userInstruction.trim()}
+                          className="flex items-center gap-1.5 text-[10px] bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-200 border border-emerald-500/30 px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+                        >
+                          <Sparkles size={12} className={isProcessing ? 'animate-spin' : ''} /> Smart Select
+                        </button>
+                        <button
+                          onClick={handleClearSelection}
+                          disabled={selectedPaths.size === 0}
+                          className="flex items-center gap-1.5 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-md transition-colors disabled:opacity-40"
+                        >
+                          <Eraser size={12} /> Clear Stack
+                        </button>
+                      </>
+                    )}
                  </div>
               </div>
               
@@ -315,7 +366,7 @@ export const PromptCanvas: React.FC = () => {
                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
                    <Edit3 size={14} /> Instruction
                 </h3>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
                    {userInstruction.length > 0 && (
                       <button 
                          onClick={handleClearInstruction}

@@ -127,7 +127,7 @@ const MessageBubble: React.FC<{ msg: any }> = ({ msg }) => {
 };
 
 export const AgentInterface: React.FC = () => {
-  const { chatMessages, sendMessage, agentActivity, stopAgent, activeModel, setActiveModel, setIsAgentOpen, clearChat } = useStore();
+  const { chatMessages, sendMessage, agentActivity, stopAgent, activeModel, setActiveModel, setIsAgentOpen, clearChat, isAgentOpen } = useStore();
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -144,6 +144,12 @@ export const AgentInterface: React.FC = () => {
   useEffect(() => {
     adjustTextareaHeight();
   }, [input]);
+
+  useEffect(() => {
+    if (isAgentOpen) {
+      textareaRef.current?.focus();
+    }
+  }, [isAgentOpen]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -166,10 +172,10 @@ export const AgentInterface: React.FC = () => {
       {/* Header */}
       <div className="p-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur flex justify-between items-center z-10 shrink-0">
          <div className="flex items-center gap-2">
-            <button onClick={() => setIsAgentOpen(false)} className="text-zinc-500 hover:text-zinc-300 mr-1 lg:hidden">
+            <button aria-label="Close agent panel" onClick={() => setIsAgentOpen(false)} className="text-zinc-500 hover:text-zinc-300 mr-1 lg:hidden">
                 <PanelRightClose size={18} />
             </button>
-            <button onClick={() => setIsAgentOpen(false)} className="text-zinc-500 hover:text-zinc-300 mr-1 hidden lg:block">
+            <button aria-label="Close agent panel" onClick={() => setIsAgentOpen(false)} className="text-zinc-500 hover:text-zinc-300 mr-1 hidden lg:block">
                 <PanelRightClose size={16} />
             </button>
             <Sparkles size={16} className="text-indigo-400" />
@@ -180,13 +186,18 @@ export const AgentInterface: React.FC = () => {
               onClick={clearChat}
               className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors"
               title="Clear Chat History"
+              aria-label="Clear chat history"
             >
               <Trash2 size={14} />
             </button>
+            <span id="model-hint" className="sr-only">Pro is higher quality, Flash is faster.</span>
             <select 
                 value={activeModel} 
                 onChange={e => setActiveModel(e.target.value as GeminiModel)}
                 className="bg-zinc-800 border-none text-[10px] text-zinc-400 rounded px-2 py-1 outline-none cursor-pointer hover:bg-zinc-700 transition-colors"
+                aria-label="Select model"
+                aria-describedby="model-hint"
+                title="Pro 3.0: higher quality, slightly slower. Flash 2.5: fastest responses."
             >
                 <option value={GeminiModel.PRO}>Pro 3.0 (Smart)</option>
                 <option value={GeminiModel.FLASH}>Flash 2.5 (Fast)</option>
@@ -230,14 +241,15 @@ export const AgentInterface: React.FC = () => {
                className="w-full bg-transparent rounded-xl py-3 pl-4 pr-12 text-sm text-zinc-200 outline-none resize-none custom-scrollbar leading-relaxed"
                style={{ minHeight: '44px', maxHeight: '300px' }}
                disabled={agentActivity.type !== 'idle'}
+               aria-label="Message the agent"
             />
             <div className="absolute right-2 bottom-2">
                {agentActivity.type !== 'idle' ? (
-                  <button type="button" onClick={stopAgent} className="p-1.5 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors" title="Stop generating">
+                  <button type="button" onClick={stopAgent} className="p-1.5 text-red-400 hover:bg-red-900/20 rounded-lg transition-colors" title="Stop generating" aria-label="Stop generating">
                      <StopCircle size={18} />
                   </button>
                ) : (
-                  <button type="submit" disabled={!input.trim()} className="p-1.5 text-indigo-400 hover:bg-indigo-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Send (Enter) / New Line (Shift+Enter)">
+                  <button type="submit" disabled={!input.trim()} className="p-1.5 text-indigo-400 hover:bg-indigo-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Send (Enter) / New Line (Shift+Enter)" aria-label="Send message">
                      <Send size={18} />
                   </button>
                )}

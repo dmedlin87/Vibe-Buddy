@@ -4,8 +4,8 @@ import { FileNode, PromptTemplate, ContextMode, GeminiModel, ChatMessage, AgentA
 import { DEFAULT_TEMPLATES } from './constants';
 import { readFileContent, getAllFilePaths } from './services/fileSystem';
 import { loadGithubRepo } from './services/githubService';
-import { generateTemplateSuggestions } from './services/geminiService';
-import { GoogleGenAI, Chat, Part, FunctionCall } from "@google/genai";
+import { generateTemplateSuggestions, suggestRelevantFiles, generateRefinedPrompt } from './services/geminiService';
+import { GoogleGenAI, Chat, Part, FunctionCall, ToolListUnion, Type } from "@google/genai";
 
 const DEFAULT_CSS = `.markdown-content { font-size: 0.9rem; line-height: 1.6; color: #d4d4d8; }
 .markdown-content h1, .markdown-content h2 { margin-top: 1rem; color: #fff; font-weight: 600; }
@@ -89,6 +89,10 @@ interface AppContextType {
   setIsAgentOpen: (b: boolean) => void;
   isExportOpen: boolean;
   setIsExportOpen: (b: boolean) => void;
+
+  // Smart helpers
+  smartSelectFiles: (instruction?: string) => Promise<void>;
+  autoRefineInstruction: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -109,7 +113,7 @@ Behavior:
 - When you are satisfied with the context and instruction, tell the user the prompt is ready.
 `;
 
-const AGENT_TOOLS = [
+const AGENT_TOOLS: ToolListUnion = [
   {
     functionDeclarations: [
       {
@@ -120,8 +124,8 @@ const AGENT_TOOLS = [
         name: "read_file",
         description: "Read the content of a file.",
         parameters: {
-          type: "OBJECT",
-          properties: { path: { type: "STRING" } },
+          type: Type.OBJECT,
+          properties: { path: { type: Type.STRING } },
           required: ["path"]
         }
       },
@@ -129,8 +133,8 @@ const AGENT_TOOLS = [
         name: "select_files",
         description: "Add files to the Prompt Context.",
         parameters: {
-          type: "OBJECT",
-          properties: { paths: { type: "ARRAY", items: { type: "STRING" } } },
+          type: Type.OBJECT,
+          properties: { paths: { type: Type.ARRAY, items: { type: Type.STRING } } },
           required: ["paths"]
         }
       },
@@ -138,8 +142,8 @@ const AGENT_TOOLS = [
         name: "deselect_files",
         description: "Remove files from the Prompt Context.",
         parameters: {
-          type: "OBJECT",
-          properties: { paths: { type: "ARRAY", items: { type: "STRING" } } },
+          type: Type.OBJECT,
+          properties: { paths: { type: Type.ARRAY, items: { type: Type.STRING } } },
           required: ["paths"]
         }
       },
@@ -147,8 +151,8 @@ const AGENT_TOOLS = [
         name: "update_instruction",
         description: "Write or Update the specific instruction for the final prompt.",
         parameters: {
-          type: "OBJECT",
-          properties: { text: { type: "STRING", description: "The detailed instruction text" } },
+          type: Type.OBJECT,
+          properties: { text: { type: Type.STRING, description: "The detailed instruction text" } },
           required: ["text"]
         }
       },
@@ -224,10 +228,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [bypassLanding, setBypassLanding] = useState(false);
   
-  // Preview
-  const [previewNode, setPreviewNode] = useState<FileNode | null>(null);
-  const [previewContent, setPreviewContent] = useState<string | null>(null);
-
   // Helpers
   const addToast = useCallback((message: string, type: 'success'|'error'|'info' = 'info') => {
     const id = Math.random().toString(36).substring(7);
@@ -235,6 +235,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 4000);
   }, []);
   const removeToast = (id: string) => setToasts(p => p.filter(t => t.id !== id));
+
+  // Preview
+  const [previewNode, setPreviewNode] = useState<FileNode | null>(null);
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+
+  // Smart helpers
+  const smartSelectFiles = useCallback(async (instruction?: string) => {
+    if (!rootNodeRef.current) {
+      addToast('Load a project before smart selecting files', 'error');
+      return;
+    }
+    const effectiveInstruction = (instruction ?? userInstructionRef.current).trim();
+    if (!effectiveInstruction) {
+      addToast('Add an instruction first so I know what to select', 'error');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const allPaths = getAllFilePaths(rootNodeRef.current);
+      const relevant = await suggestRelevantFiles(effectiveInstruction, allPaths);
+      if (!relevant || relevant.length === 0) {
+        addToast('No relevant files detected from the instruction', 'info');
+        return;
+      }
+      const next = new Set(selectedPathsRef.current);
+      relevant.forEach(p => next.add(p));
+      setSelectedPaths(next);
+      addToast(`Smart-selected ${relevant.length} file(s)`, 'success');
+    } catch (e: any) {
+      addToast(`Smart select failed: ${e.message}`, 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [addToast]);
+
+  const autoRefineInstruction = useCallback(async () => {
+    const currentInstruction = userInstructionRef.current?.trim() || '';
+    if (!currentInstruction) {
+      addToast('Add an instruction first to refine', 'error');
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const refined = await generateRefinedPrompt(currentInstruction, Array.from(selectedPathsRef.current));
+      setUserInstruction(refined);
+      addToast('Instruction refined', 'success');
+    } catch (e: any) {
+      addToast(`Refine failed: ${e.message}`, 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [addToast]);
 
   const savePrompt = useCallback((name: string, content: string, tags: string[] = ['custom']) => {
     const newPrompt: PromptTemplate = {
@@ -576,6 +629,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
   const closePreview = () => { setPreviewNode(null); setPreviewContent(null); };
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + Shift + A toggles Agent panel and focuses input when opening
+      const isMeta = e.metaKey || e.ctrlKey;
+      if (isMeta && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setIsAgentOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   return (
     <AppContext.Provider value={{
       rootNode, setRootNode, loadLocalProject,
@@ -595,7 +662,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recentRepos, removeRecentRepo,
       bypassLanding, setBypassLanding,
       projectMetadata, refreshProject,
-      isExportOpen, setIsExportOpen
+      isExportOpen, setIsExportOpen,
+      smartSelectFiles, autoRefineInstruction
     }}>
       {children}
     </AppContext.Provider>

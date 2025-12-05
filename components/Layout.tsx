@@ -1,11 +1,11 @@
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, Dispatch, SetStateAction } from 'react';
 import { useStore } from '../store';
 import { FileTree } from './FileTree';
 import { PromptCanvas } from './PromptCanvas';
 import { AgentInterface } from './AgentInterface';
 import { openDirectory, processFileList } from '../services/fileSystem';
-import { FolderPlus, Github, Loader2, X, Search, Trash2, PanelLeftClose, PanelLeftOpen, PanelRightOpen, PanelRightClose, Box, History, ArrowRight, Home, LogOut, FolderOpen, RefreshCw, UploadCloud } from 'lucide-react';
+import { FolderPlus, Github, Loader2, X, Search, PanelLeftClose, PanelLeftOpen, PanelRightOpen, Box, History, ArrowRight, Home, LogOut, FolderOpen, RefreshCw, UploadCloud } from 'lucide-react';
 import { FilePreviewModal } from './FilePreviewModal';
 import { ExportModal } from './ExportModal';
 
@@ -23,8 +23,101 @@ const ToastContainer: React.FC = () => {
   );
 };
 
+type GithubImportModalProps = {
+  show: boolean;
+  githubUrl: string;
+  setGithubUrl: Dispatch<SetStateAction<string>>;
+  githubToken: string;
+  setGithubToken: Dispatch<SetStateAction<string>>;
+  recentRepos: string[];
+  isProcessing: boolean;
+  onClose: () => void;
+  onSubmit: (e: React.FormEvent) => Promise<void>;
+};
+
+const GithubImportModal: React.FC<GithubImportModalProps> = ({
+  show,
+  githubUrl,
+  setGithubUrl,
+  githubToken,
+  setGithubToken,
+  recentRepos,
+  isProcessing,
+  onClose,
+  onSubmit,
+}) => {
+  useEffect(() => {
+    if (!show) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [show, onClose]);
+
+  if (!show) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+      <form onSubmit={onSubmit} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 w-96 space-y-4 shadow-2xl animate-in zoom-in-95">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-white">Import Repository</h3>
+          <button type="button" onClick={onClose} className="text-zinc-500 hover:text-white" aria-label="Close import modal">
+            <X size={16} />
+          </button>
+        </div>
+        <input
+          value={githubUrl}
+          onChange={e => setGithubUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo"
+          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white focus:border-indigo-500 outline-none"
+          autoFocus
+        />
+        <input
+          value={githubToken}
+          onChange={e => setGithubToken(e.target.value)}
+          placeholder="GitHub Token (Optional)"
+          type="password"
+          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white focus:border-indigo-500 outline-none"
+        />
+
+        {recentRepos.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-zinc-800">
+            <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Recent</div>
+            <div className="flex flex-col gap-1 max-h-32 overflow-y-auto custom-scrollbar bg-zinc-950/50 rounded-lg p-1 border border-zinc-800/50">
+              {recentRepos.map(repo => (
+                <button
+                  key={repo}
+                  type="button"
+                  onClick={() => setGithubUrl(repo)}
+                  className="text-left text-xs text-zinc-400 hover:text-white hover:bg-zinc-800/50 px-2 py-1.5 rounded truncate font-mono transition-colors"
+                >
+                  {repo}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-white">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isProcessing}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {isProcessing ? <Loader2 className="animate-spin" size={16} /> : 'Import'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
 export const Layout: React.FC = () => {
-  const { rootNode, setRootNode, importGithubProject, isProcessing, clearSelection, selectedPaths, isSidebarOpen, setIsSidebarOpen, isAgentOpen, setIsAgentOpen, recentRepos, removeRecentRepo, bypassLanding, setBypassLanding, closeProject, refreshProject, projectMetadata, loadLocalProject, setIsExportOpen } = useStore();
+  const { rootNode, importGithubProject, isProcessing, selectedPaths, isSidebarOpen, setIsSidebarOpen, isAgentOpen, setIsAgentOpen, recentRepos, removeRecentRepo, bypassLanding, setBypassLanding, closeProject, refreshProject, projectMetadata, loadLocalProject, setIsExportOpen } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showGithubModal, setShowGithubModal] = useState(false);
   const [githubUrl, setGithubUrl] = useState('');
@@ -173,41 +266,17 @@ export const Layout: React.FC = () => {
       <ExportModal />
       <input type="file" ref={fileInputRef} onChange={handleFileInputChange} className="hidden" {...{ webkitdirectory: "", multiple: true } as any} />
 
-       {/* GITHUB MODAL RE-USED FOR SIDEBAR ACCESS */}
-       {showGithubModal && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-               <form onSubmit={handleGithubSubmit} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 w-96 space-y-4 shadow-2xl animate-in zoom-in-95">
-                  <h3 className="text-lg font-bold text-white">Import Repository</h3>
-                  <input value={githubUrl} onChange={e=>setGithubUrl(e.target.value)} placeholder="https://github.com/owner/repo" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white focus:border-indigo-500 outline-none" autoFocus />
-                  <input value={githubToken} onChange={e=>setGithubToken(e.target.value)} placeholder="GitHub Token (Optional)" type="password" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-white focus:border-indigo-500 outline-none" />
-                  
-                  {recentRepos.length > 0 && (
-                    <div className="space-y-2 pt-2 border-t border-zinc-800">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Recent</div>
-                      <div className="flex flex-col gap-1 max-h-32 overflow-y-auto custom-scrollbar bg-zinc-950/50 rounded-lg p-1 border border-zinc-800/50">
-                        {recentRepos.map(repo => (
-                          <button
-                            key={repo}
-                            type="button"
-                            onClick={() => setGithubUrl(repo)}
-                            className="text-left text-xs text-zinc-400 hover:text-white hover:bg-zinc-800/50 px-2 py-1.5 rounded truncate font-mono transition-colors"
-                          >
-                            {repo}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-end gap-2">
-                     <button type="button" onClick={()=>setShowGithubModal(false)} className="px-4 py-2 text-sm text-zinc-400 hover:text-white">Cancel</button>
-                     <button type="submit" disabled={isProcessing} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-500 disabled:opacity-50">
-                        {isProcessing ? <Loader2 className="animate-spin" size={16}/> : 'Import'}
-                     </button>
-                  </div>
-               </form>
-            </div>
-         )}
+       <GithubImportModal
+         show={showGithubModal}
+         githubUrl={githubUrl}
+         setGithubUrl={setGithubUrl}
+         githubToken={githubToken}
+         setGithubToken={setGithubToken}
+         recentRepos={recentRepos}
+         isProcessing={isProcessing}
+         onClose={() => setShowGithubModal(false)}
+         onSubmit={handleGithubSubmit}
+       />
 
       {/* LEFT: File Explorer / Project Manager */}
       <aside className={`${isSidebarOpen ? 'w-72' : 'w-0'} bg-zinc-900/30 border-r border-zinc-800 flex flex-col transition-all duration-300 overflow-hidden shrink-0`}>
