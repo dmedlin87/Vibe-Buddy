@@ -1,0 +1,5 @@
+{
+  "name": "VibePrompt Studio",
+  "description": "A local-first Prompt IDE for developers. Build, refine, and swarm-generate prompts using your local codebase context.",
+  "requestFramePermissions": []
+}
