@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { FileNode } from '../types';
 import { readFileContent } from '../services/fileSystem';
 import { isSystemIgnored } from '../constants';
-import { X, Loader2, Download, Copy, AlertTriangle, FileText, Check, Database, Filter } from 'lucide-react';
+import { X, Loader2, Download, Copy, AlertTriangle, FileText, Check, Database, Filter, RotateCcw, Sparkles } from 'lucide-react';
 
 // Roughly 4 chars per token is the industry standard estimate
 const TOKENS_PER_CHAR = 0.25;
@@ -49,24 +49,33 @@ export const ExportModal: React.FC = () => {
   const [stats, setStats] = useState({ size: 0, tokens: 0, count: 0 });
   const [copied, setCopied] = useState(false);
   const [useGitIgnore, setUseGitIgnore] = useState(true);
+  const [activeStep, setActiveStep] = useState<'scan' | 'share'>('scan');
+  const abortRef = useRef<boolean>(false);
+  const [hasBundle, setHasBundle] = useState(false);
 
   // Reset state when modal opens
   useEffect(() => {
     if (isExportOpen && rootNode) {
-      scanProject();
+      setActiveStep('scan');
+      setStatus('idle');
+      setHasBundle(false);
     } else {
       setStatus('idle');
       setProgress(0);
       setContextContent('');
+      setHasBundle(false);
+      abortRef.current = false;
     }
-  }, [isExportOpen, rootNode, useGitIgnore]); // Re-scan if gitignore toggle changes
+  }, [isExportOpen, rootNode]);
 
   const scanProject = async () => {
     if (!rootNode) return;
+    abortRef.current = false;
     setStatus('scanning');
     setProgress(0);
     setScannedFiles(0);
     setContextContent('');
+    setHasBundle(false);
 
     // 1. First Pass: Detect .gitignore rules if enabled
     let gitIgnoreRules: string[] = [];
@@ -111,6 +120,12 @@ export const ExportModal: React.FC = () => {
     // Process in chunks to maintain UI responsiveness
     const CHUNK_SIZE = 5;
     for (let i = 0; i < candidates.length; i += CHUNK_SIZE) {
+        if (abortRef.current) {
+          setStatus('idle');
+          setProgress(0);
+          setScannedFiles(0);
+          return;
+        }
         const chunk = candidates.slice(i, i + CHUNK_SIZE);
         const promises = chunk.map(async (file) => {
             try {
@@ -150,6 +165,12 @@ export const ExportModal: React.FC = () => {
         count: processed // Actual count of included files (excluding binaries/errors)
     });
     setStatus('ready');
+    setActiveStep('share');
+    setHasBundle(true);
+  };
+
+  const cancelScan = () => {
+    abortRef.current = true;
   };
 
   const handleDownloadContext = () => {
@@ -170,119 +191,175 @@ export const ExportModal: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const formatBytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+
   if (!isExportOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden max-h-[90vh]">
-        {/* Header */}
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]">
         <div className="flex justify-between items-center p-4 border-b border-zinc-800 bg-zinc-900">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-             <Database className="text-blue-400" size={20} /> Export Project Context
-          </h2>
-          <button onClick={() => setIsExportOpen(false)} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors">
+          <div>
+            <p className="text-[11px] uppercase text-zinc-500 tracking-[0.18em] flex items-center gap-2">
+              <Database className="text-blue-400" size={16} /> Context Export
+            </p>
+            <h2 className="text-lg font-bold text-white">Share a clean project snapshot</h2>
+            <p className="text-xs text-zinc-500">Generate a lightweight bundle, then copy the prompt to pair with it.</p>
+          </div>
+          <button onClick={() => setIsExportOpen(false)} className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors">
              <X size={20}/>
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto custom-scrollbar space-y-8 bg-zinc-950/50">
-            
-            {/* 1. Context Generator Section */}
+        <div className="px-6 pt-5 pb-2 border-b border-zinc-800 bg-zinc-950/50">
+          <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide">
+            <button
+              onClick={() => setActiveStep('scan')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${activeStep === 'scan' ? 'border-blue-500/40 bg-blue-500/10 text-blue-200 shadow-inner shadow-blue-900/20' : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-zinc-200'}`}
+            >
+              <span className="h-6 w-6 rounded-full bg-blue-500/20 text-blue-200 flex items-center justify-center text-[11px] font-bold">1</span>
+              Clean Bundle
+            </button>
+            <span className="w-8 h-px bg-zinc-800" />
+            <button
+              onClick={() => status === 'ready' && setActiveStep('share')}
+              disabled={status !== 'ready'}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${activeStep === 'share' ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200 shadow-inner shadow-indigo-900/20' : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-zinc-200 disabled:opacity-40'}`}
+            >
+              <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-200 flex items-center justify-center text-[11px] font-bold">2</span>
+              Share Prompt
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 bg-zinc-950/60">
+          {activeStep === 'scan' && (
             <div className="space-y-4">
-               <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-300">1. Project Context Bundle</h3>
-                  <div className="flex items-center gap-4">
-                      {/* GitIgnore Toggle */}
-                      <button 
-                        onClick={() => setUseGitIgnore(!useGitIgnore)}
-                        className={`flex items-center gap-2 text-xs font-medium px-2 py-1 rounded border transition-colors ${useGitIgnore ? 'bg-zinc-800 text-green-400 border-green-900' : 'bg-zinc-900 text-zinc-500 border-zinc-800'}`}
-                        title="Toggle .gitignore parsing"
-                      >
-                         <Filter size={12} /> .gitignore {useGitIgnore ? 'ON' : 'OFF'}
-                      </button>
-
-                      {status === 'ready' && (
-                        <div className="flex gap-4 text-xs font-mono">
-                            <span className="text-zinc-500">{stats.count} files</span>
-                            <span className="text-zinc-500">{(stats.size / 1024 / 1024).toFixed(2)} MB</span>
-                            <span className={stats.tokens > TOKEN_WARNING_THRESHOLD ? "text-yellow-500 font-bold" : "text-zinc-500"}>
-                              ~{(stats.tokens / 1000).toFixed(0)}k Tokens
-                            </span>
-                        </div>
-                      )}
-                  </div>
-               </div>
-
-               {status === 'scanning' ? (
-                  <div className="space-y-2">
-                     <div className="flex justify-between text-xs text-zinc-500">
-                        <span className="flex items-center gap-2"><Loader2 className="animate-spin" size={12}/> Scanning & Filtering...</span>
-                        <span>{scannedFiles} / {totalFiles} candidates</span>
-                     </div>
-                     <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
-                        <div 
-                           className="h-full bg-blue-500 transition-all duration-300 ease-out"
-                           style={{ width: `${progress}%` }}
-                        />
-                     </div>
-                  </div>
-               ) : (
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-                     {stats.tokens > TOKEN_WARNING_THRESHOLD && (
-                        <div className="flex items-start gap-3 p-3 mb-4 rounded bg-yellow-900/20 border border-yellow-700/50 text-yellow-200 text-xs">
-                           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-                           <div>
-                              <strong className="block mb-1">Large Context Warning</strong>
-                              This project exceeds 1 Million tokens. Consider adding more rules to .gitignore or manually deselecting folders.
-                           </div>
-                        </div>
-                     )}
-                     
-                     <div className="flex items-center justify-between">
-                         <div className="text-sm text-zinc-400">
-                            Download cleaned project files (binaries & ignored files excluded).
-                         </div>
-                         <button 
-                           onClick={handleDownloadContext}
-                           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/20"
-                         >
-                            <Download size={16} /> Download Context
-                         </button>
-                     </div>
-                  </div>
-               )}
-            </div>
-
-            <div className="border-t border-zinc-800" />
-
-            {/* 2. Prompt Section */}
-            <div className="space-y-4">
-               <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-300">2. Your Prompt</h3>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold text-zinc-200">Clean bundle for LLMs</h3>
+                  <p className="text-xs text-zinc-500">We filter binaries, respect .gitignore, and wrap text files in one XML file.</p>
+                </div>
+                <div className="flex items-center gap-2">
                   <button 
-                     onClick={handleCopyPrompt}
-                     className="flex items-center gap-2 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                    onClick={() => { setUseGitIgnore(!useGitIgnore); }}
+                    className={`flex items-center gap-2 text-[11px] font-semibold px-3 py-1.5 rounded-md border transition-colors ${useGitIgnore ? 'bg-zinc-800 text-green-300 border-green-900' : 'bg-zinc-900 text-zinc-400 border-zinc-800'}`}
+                    title="Toggle .gitignore parsing"
                   >
-                     {copied ? <Check size={14} /> : <Copy size={14} />}
-                     {copied ? "Copied" : "Copy to Clipboard"}
+                     <Filter size={12} /> .gitignore {useGitIgnore ? 'On' : 'Off'}
                   </button>
-               </div>
+                  <button
+                    onClick={scanProject}
+                    className="flex items-center gap-2 text-[11px] font-semibold px-3 py-1.5 rounded-md border border-blue-500/40 text-blue-200 bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
+                    title="Rescan project"
+                  >
+                    <RotateCcw size={12} /> Rescan
+                  </button>
+                </div>
+              </div>
 
-               <div className="relative group">
-                  <div className="absolute top-2 right-2 p-1 bg-zinc-800/80 rounded text-zinc-500">
-                     <FileText size={14} />
+              {status === 'scanning' && (
+                <div className="space-y-3 bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <div className="flex justify-between text-xs text-zinc-400">
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="animate-spin text-blue-400" size={14}/> Building bundle...
+                    </span>
+                    <span className="font-mono">{scannedFiles} / {totalFiles} files</span>
                   </div>
-                  <pre className="w-full h-32 bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-400 font-mono overflow-y-auto custom-scrollbar resize-none whitespace-pre-wrap">
-                     {userInstruction || "(No instruction provided)"}
-                  </pre>
-               </div>
-               
-               <p className="text-xs text-zinc-500">
-                  <strong>Tip:</strong> Upload the <em>Context Bundle</em> file to Gemini/Claude first, then paste this prompt.
-               </p>
-            </div>
+                  <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
+                    <div 
+                       className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-300 ease-out"
+                       style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-zinc-500">We skip binaries and ignored paths to keep the bundle light.</p>
+                </div>
+              )}
 
+              {status === 'ready' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="border border-zinc-800 rounded-xl bg-zinc-900/70 p-3">
+                      <p className="text-[11px] uppercase text-zinc-500 font-semibold">Files</p>
+                      <p className="text-xl font-bold text-white">{stats.count}</p>
+                    </div>
+                    <div className="border border-zinc-800 rounded-xl bg-zinc-900/70 p-3">
+                      <p className="text-[11px] uppercase text-zinc-500 font-semibold">Bundle Size</p>
+                      <p className="text-xl font-bold text-white">{formatBytes(stats.size)}</p>
+                    </div>
+                    <div className="border border-zinc-800 rounded-xl bg-zinc-900/70 p-3">
+                      <p className="text-[11px] uppercase text-zinc-500 font-semibold">~Tokens</p>
+                      <p className={`text-xl font-bold ${stats.tokens > TOKEN_WARNING_THRESHOLD ? 'text-yellow-300' : 'text-white'}`}>
+                        {(stats.tokens / 1000).toFixed(0)}k
+                      </p>
+                    </div>
+                  </div>
+
+                  {stats.tokens > TOKEN_WARNING_THRESHOLD && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-yellow-900/20 border border-yellow-800/60 text-yellow-200 text-xs">
+                       <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                       <div>
+                          <strong className="block mb-1">Large bundle</strong>
+                          Consider tightening .gitignore or deselecting heavy folders before exporting.
+                       </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-zinc-200">Download context bundle</p>
+                      <p className="text-xs text-zinc-500">Upload this XML to your model before pasting the prompt.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={handleDownloadContext}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/20"
+                      >
+                        <Download size={16} /> Download
+                      </button>
+                      <button
+                        onClick={() => setActiveStep('share')}
+                        className="flex items-center gap-2 text-sm font-semibold px-3 py-2 rounded-lg border border-indigo-500/40 text-indigo-200 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors"
+                      >
+                        <Sparkles size={16}/> Go to prompt
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeStep === 'share' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold text-zinc-200">Share-ready prompt</h3>
+                  <p className="text-xs text-zinc-500">Copy the instruction you’ll pair with the bundle.</p>
+                </div>
+                <button 
+                   onClick={handleCopyPrompt}
+                   className="flex items-center gap-2 text-xs text-indigo-300 hover:text-indigo-200 transition-colors"
+                >
+                   {copied ? <Check size={14} /> : <Copy size={14} />}
+                   {copied ? "Copied" : "Copy to Clipboard"}
+                </button>
+              </div>
+
+              <div className="relative group">
+                <div className="absolute top-2 right-2 p-1 bg-zinc-800/80 rounded text-zinc-500">
+                   <FileText size={14} />
+                </div>
+                <pre className="w-full h-40 bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-300 font-mono overflow-y-auto custom-scrollbar whitespace-pre-wrap">
+                   {userInstruction || "(No instruction provided)"}
+                </pre>
+              </div>
+
+              <div className="text-xs text-zinc-500">
+                <strong>Tip:</strong> Upload the <em>Context Bundle</em> first, then paste this prompt so the model can use both together.
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

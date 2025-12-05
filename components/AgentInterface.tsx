@@ -168,9 +168,9 @@ export const AgentInterface: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div className="flex flex-col h-full relative bg-gradient-to-b from-zinc-950 via-zinc-950 to-black">
       {/* Header */}
-      <div className="p-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur flex justify-between items-center z-10 shrink-0">
+      <div className="p-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur flex justify-between items-center z-10 shrink-0 shadow-[0_10px_40px_rgba(0,0,0,0.35)]">
          <div className="flex items-center gap-2">
             <button aria-label="Close agent panel" onClick={() => setIsAgentOpen(false)} className="text-zinc-500 hover:text-zinc-300 mr-1 lg:hidden">
                 <PanelRightClose size={18} />
@@ -178,8 +178,16 @@ export const AgentInterface: React.FC = () => {
             <button aria-label="Close agent panel" onClick={() => setIsAgentOpen(false)} className="text-zinc-500 hover:text-zinc-300 mr-1 hidden lg:block">
                 <PanelRightClose size={16} />
             </button>
-            <Sparkles size={16} className="text-indigo-400" />
-            <span className="text-sm font-bold text-white tracking-wide">Vibe Agent</span>
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500/80 to-purple-600/80 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+              <Sparkles size={16} className="text-white" />
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-bold text-white tracking-wide">Vibe Agent</span>
+              <span className="text-[11px] text-zinc-500">Plan, reason, ship</span>
+            </div>
+            <span className="ml-2 px-2 py-1 text-[10px] rounded-full border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 font-semibold uppercase tracking-wide">
+              {agentActivity.type === 'idle' ? 'Ready' : 'Working'}
+            </span>
          </div>
          <div className="flex items-center gap-2">
             <button 
@@ -208,9 +216,15 @@ export const AgentInterface: React.FC = () => {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 relative">
          {chatMessages.length === 0 && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 opacity-50 pointer-events-none">
-               <Bot size={48} className="mb-4 text-zinc-700" />
-               <p className="text-sm">I am ready to architect your prompt.</p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 opacity-70 pointer-events-none">
+               <Bot size={48} className="mb-4 text-indigo-500/60" />
+               <p className="text-sm text-zinc-400">No messages yet. Describe your goal and press Enter to start.</p>
+               <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
+                 <span className="bg-zinc-800/70 border border-zinc-700 px-2 py-1 rounded">Enter</span>
+                 <span>send</span>
+                 <span className="bg-zinc-800/70 border border-zinc-700 px-2 py-1 rounded">Shift + Enter</span>
+                 <span>newline</span>
+               </div>
             </div>
          )}
          
@@ -238,7 +252,7 @@ export const AgentInterface: React.FC = () => {
                onKeyDown={handleKeyDown}
                placeholder="Describe your task..."
                rows={1}
-               className="w-full bg-transparent rounded-xl py-3 pl-4 pr-12 text-sm text-zinc-200 outline-none resize-none custom-scrollbar leading-relaxed"
+               className="w-full bg-transparent rounded-xl py-3 pl-4 pr-14 text-sm text-zinc-200 outline-none resize-none custom-scrollbar leading-relaxed"
                style={{ minHeight: '44px', maxHeight: '300px' }}
                disabled={agentActivity.type !== 'idle'}
                aria-label="Message the agent"
@@ -249,8 +263,8 @@ export const AgentInterface: React.FC = () => {
                      <StopCircle size={18} />
                   </button>
                ) : (
-                  <button type="submit" disabled={!input.trim()} className="p-1.5 text-indigo-400 hover:bg-indigo-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Send (Enter) / New Line (Shift+Enter)" aria-label="Send message">
-                     <Send size={18} />
+                  <button type="submit" disabled={!input.trim()} className="p-1.5 text-white bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-400 hover:to-purple-400 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/40" title="Send (Enter) / New Line (Shift+Enter)" aria-label="Send message">
+                     <Send size={18} className="drop-shadow" />
                   </button>
                )}
             </div>

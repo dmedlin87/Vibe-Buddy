@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../store';
-import { Copy, Check, FileText, Link2, Layers, Edit3, Book, Save, Trash2, Plus, Download, LayoutTemplate, Filter, Tag, Sparkles, Braces, Search, Grid, List, MoreVertical, Lightbulb, Eye, Maximize2, X, Eraser } from 'lucide-react';
+import { Copy, Check, FileText, Link2, Layers, Edit3, Book, Save, Trash2, Plus, Download, LayoutTemplate, Filter, Tag, Sparkles, Braces, Search, Grid, List, MoreVertical, Lightbulb, Eye, Maximize2, X, Eraser, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { DEFAULT_TEMPLATES } from '../constants';
 import { PromptTemplate } from '../types';
 
@@ -12,10 +12,14 @@ export const PromptCanvas: React.FC = () => {
     savedPrompts, suggestedTemplates, savePrompt, updatePrompt, deletePrompt,
     generateSuggestions, saveSuggestedTemplate, isProcessing,
     sendMessage, agentActivity, addToast, rootNode, isSidebarOpen,
-    smartSelectFiles, autoRefineInstruction, clearSelection
+    smartSelectFiles, autoRefineInstruction, clearSelection,
+    beginnerMode, setBeginnerMode,
+    simpleFlowRunning, simpleFlow, runSimpleFlow
   } = useStore();
   
   const [copied, setCopied] = useState(false);
+  const [copiedCodemap, setCopiedCodemap] = useState(false);
+  const [copiedImpl, setCopiedImpl] = useState(false);
   const [activeTab, setActiveTab] = useState<'canvas' | 'library' | 'preview'>('canvas');
   
   // Library State
@@ -24,11 +28,75 @@ export const PromptCanvas: React.FC = () => {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   // Modal State
-  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showSaveSheet, setShowSaveSheet] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<PromptTemplate | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<PromptTemplate | null>(null);
   const [newPromptName, setNewPromptName] = useState('');
   const [newPromptTags, setNewPromptTags] = useState('');
+
+  const presets = [
+    { label: 'Fix a bug', text: 'Investigate and fix the reported bug. Identify root cause, propose minimal fix, and add a regression test.' },
+    { label: 'Add component', text: 'Add a new UI component following existing patterns. Include state, props, and accessibility considerations.' },
+    { label: 'Refactor', text: 'Refactor the target area for clarity and maintainability without changing behavior. Add comments only if needed.' },
+    { label: 'Write tests', text: 'Add focused tests covering critical paths and edge cases. Prefer Vitest + RTL for React code.' },
+  ];
+
+  const renderStep = (label: string, status: string) => {
+    const statusMap: Record<string, { icon: React.ReactNode; className: string; text: string }> = {
+      idle: { icon: <Loader2 size={12} className="text-zinc-500" />, className: 'border-zinc-700 text-zinc-400', text: 'Pending' },
+      running: { icon: <Loader2 size={12} className="animate-spin text-indigo-300" />, className: 'border-indigo-500/40 text-indigo-200 bg-indigo-500/10', text: 'Running' },
+      done: { icon: <CheckCircle2 size={12} className="text-emerald-300" />, className: 'border-emerald-500/40 text-emerald-200 bg-emerald-500/10', text: 'Done' },
+      error: { icon: <XCircle size={12} className="text-red-300" />, className: 'border-red-500/40 text-red-200 bg-red-500/10', text: 'Error' },
+    };
+    const meta = statusMap[status] || statusMap.idle;
+    return (
+      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] border ${meta.className}`}>
+        {meta.icon}
+        <span className="font-semibold">{label}</span>
+        <span className="text-[10px] opacity-70">{meta.text}</span>
+      </div>
+    );
+  };
+
+  const handleCopyCodemap = () => {
+    if (!simpleFlow.codemapPrompt) {
+      addToast('Run Simple mode to generate a Codemap prompt first', 'info');
+      return;
+    }
+    navigator.clipboard.writeText(simpleFlow.codemapPrompt);
+    setCopiedCodemap(true);
+    addToast('Codemap prompt copied', 'success');
+    setTimeout(() => setCopiedCodemap(false), 1800);
+  };
+
+  const handleCopyImplementation = () => {
+    if (!simpleFlow.implementationPrompt) {
+      addToast('Run Simple mode to generate an Implementation prompt first', 'info');
+      return;
+    }
+    navigator.clipboard.writeText(simpleFlow.implementationPrompt);
+    setCopiedImpl(true);
+    addToast('Implementation prompt copied', 'success');
+    setTimeout(() => setCopiedImpl(false), 1800);
+  };
+
+  const handleRunSimpleFlow = async () => {
+    await runSimpleFlow();
+  };
+
+  const hasSimpleOutputs = Boolean(simpleFlow.codemapPrompt || simpleFlow.implementationPrompt);
+  const disableSimpleFlow = simpleFlowRunning || isProcessing || agentActivity.type !== 'idle';
+
+  useEffect(() => {
+    if (simpleFlow.status.build === 'done') {
+      setActiveTab('preview');
+    }
+  }, [simpleFlow.status.build]);
+
+  useEffect(() => {
+    setCopiedCodemap(false);
+    setCopiedImpl(false);
+  }, [simpleFlow.codemapPrompt, simpleFlow.implementationPrompt]);
 
   const handleCopy = () => {
      if (!generatedPrompt) return;
@@ -52,7 +120,7 @@ export const PromptCanvas: React.FC = () => {
     setNewPromptName('');
     setNewPromptTags('');
     setEditingPrompt(null);
-    setShowSaveModal(false);
+    setShowSaveSheet(false);
   };
 
   const handleRefine = async () => {
@@ -126,11 +194,11 @@ export const PromptCanvas: React.FC = () => {
     setEditingPrompt(prompt);
     setNewPromptName(prompt.name);
     setNewPromptTags(prompt.tags.join(', '));
-    setShowSaveModal(true);
+    setShowSaveSheet(true);
   };
   
   const closeSaveModal = () => {
-    setShowSaveModal(false);
+    setShowSaveSheet(false);
     setEditingPrompt(null);
     setNewPromptName('');
     setNewPromptTags('');
@@ -176,17 +244,25 @@ export const PromptCanvas: React.FC = () => {
   return (
     <div className="flex flex-col h-full relative bg-zinc-950">
       {/* Canvas Header */}
-      <div className={`h-14 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between gap-4 shrink-0 backdrop-blur-sm z-10 transition-all duration-300 ${!isSidebarOpen ? 'pl-14 pr-6' : 'px-6'}`}>
-            <div className="flex gap-6">
+      <div className={`h-16 border-b border-zinc-800/70 bg-zinc-900/70 flex items-center justify-between gap-4 shrink-0 backdrop-blur-lg z-10 transition-all duration-300 shadow-[0_10px_40px_rgba(0,0,0,0.28)] ${!isSidebarOpen ? 'pl-14 pr-6' : 'px-6'}`}>
+            <div className="flex gap-2 bg-zinc-950/40 border border-zinc-800/70 rounded-xl p-1 shadow-inner shadow-black/30">
             <button 
               onClick={() => setActiveTab('canvas')} 
-              className={`text-sm font-medium h-14 border-b-2 transition-all flex items-center gap-2 ${activeTab === 'canvas' ? 'text-indigo-400 border-indigo-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+              className={`text-sm font-semibold px-3 h-12 rounded-lg transition-all flex items-center gap-2 ${
+                activeTab === 'canvas' 
+                  ? 'text-white bg-gradient-to-r from-indigo-600/70 to-purple-600/50 shadow-[0_8px_24px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/40' 
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'
+              }`}
             >
                <Edit3 size={16} /> Canvas
             </button>
             <button 
               onClick={() => setActiveTab('library')} 
-              className={`text-sm font-medium h-14 border-b-2 transition-all flex items-center gap-2 ${activeTab === 'library' ? 'text-indigo-400 border-indigo-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
+              className={`text-sm font-semibold px-3 h-12 rounded-lg transition-all flex items-center gap-2 ${
+                activeTab === 'library' 
+                  ? 'text-white bg-gradient-to-r from-indigo-600/70 to-purple-600/50 shadow-[0_8px_24px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/40' 
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'
+              }`}
             >
                <Book size={16} /> Library
                {suggestedTemplates.length > 0 && (
@@ -197,37 +273,68 @@ export const PromptCanvas: React.FC = () => {
             </button>
             <button 
               onClick={() => setActiveTab('preview')} 
-              className={`text-sm font-medium h-14 border-b-2 transition-all flex items-center gap-2 ${activeTab === 'preview' ? 'text-indigo-400 border-indigo-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'}`}
-            >
-               <FileText size={16} /> Final Output
-            </button>
-         </div>
-         
-         {activeTab === 'preview' && (
-            <button onClick={handleCopy} className="flex items-center gap-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-all shadow-lg shadow-indigo-500/20 active:scale-95">
-               {copied ? <Check size={14}/> : <Copy size={14}/>}
-               {copied ? 'Copied' : 'Copy Prompt'}
-            </button>
-         )}
+              className={`text-sm font-semibold px-3 h-12 rounded-lg transition-all flex items-center gap-2 ${
+                activeTab === 'preview' 
+                  ? 'text-white bg-gradient-to-r from-indigo-600/70 to-purple-600/50 shadow-[0_8px_24px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/40' 
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'
 
-         {/* Global quick copy button for other tabs */}
-         {activeTab !== 'preview' && (
-           <button
-             onClick={handleCopy}
-             disabled={!generatedPrompt}
-             className="flex items-center gap-2 text-[11px] font-semibold bg-zinc-900 border border-zinc-800 text-zinc-300 px-3 py-1.5 rounded-lg transition-all hover:border-indigo-500/40 hover:text-white hover:bg-zinc-800/80 disabled:opacity-50 disabled:cursor-not-allowed"
-             aria-label="Copy generated prompt"
-             title={generatedPrompt ? 'Copy current prompt output' : 'Generate a prompt to copy'}
-           >
-             {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-             {copied ? 'Copied' : 'Copy Prompt'}
-           </button>
-         )}
+const filteredTemplates = useMemo(() => {
+  return allTemplates.filter(t => {
+    const matchesSearch = t.name.toLowerCase().includes(librarySearch.toLowerCase()) || 
+                          t.template.toLowerCase().includes(librarySearch.toLowerCase());
+    const matchesType = libraryFilter === 'all' || 
+                        // @ts-ignore
+                        (libraryFilter === 'saved' && t.type === 'custom') || 
+                        // @ts-ignore
+                        (libraryFilter === 'system' && t.type === 'system') ||
+                        // @ts-ignore
+                        (libraryFilter === 'suggested' && t.type === 'suggested');
+    const matchesTag = selectedTag ? t.tags.includes(selectedTag) : true;
+    
+    return matchesSearch && matchesType && matchesTag;
+  });
+}, [allTemplates, librarySearch, libraryFilter, selectedTag]);
 
-         {activeTab === 'library' && (
-             <div className="flex items-center gap-2">
-                 {rootNode && (
-                   <button 
+return (
+  <div className="flex flex-col h-full relative bg-zinc-950">
+    {/* Canvas Header */}
+    <div className={`h-16 border-b border-zinc-800/70 bg-zinc-900/70 flex items-center justify-between gap-4 shrink-0 backdrop-blur-lg z-10 transition-all duration-300 shadow-[0_10px_40px_rgba(0,0,0,0.28)] ${!isSidebarOpen ? 'pl-14 pr-6' : 'px-6'}`}>
+      <div className="flex gap-2 bg-zinc-950/40 border border-zinc-800/70 rounded-xl p-1 shadow-inner shadow-black/30">
+        <button 
+          onClick={() => setActiveTab('canvas')} 
+          className={`text-sm font-semibold px-3 h-12 rounded-lg transition-all flex items-center gap-2 ${
+            activeTab === 'canvas' 
+              ? 'text-white bg-gradient-to-r from-indigo-600/70 to-purple-600/50 shadow-[0_8px_24px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/40' 
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'
+          }`}
+        >
+          <Edit3 size={16} /> Canvas
+        </button>
+        <button 
+          onClick={() => setActiveTab('library')} 
+          className={`text-sm font-semibold px-3 h-12 rounded-lg transition-all flex items-center gap-2 ${
+            activeTab === 'library' 
+              ? 'text-white bg-gradient-to-r from-indigo-600/70 to-purple-600/50 shadow-[0_8px_24px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/40' 
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'
+          }`}
+        >
+          <Book size={16} /> Library
+          {suggestedTemplates.length > 0 && (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-[9px] text-white">
+              {suggestedTemplates.length}
+            </span>
+          )}
+        </button>
+        <button 
+          onClick={() => setActiveTab('preview')} 
+          className={`text-sm font-semibold px-3 h-12 rounded-lg transition-all flex items-center gap-2 ${
+            activeTab === 'preview' 
+              ? 'text-white bg-gradient-to-r from-indigo-600/70 to-purple-600/50 shadow-[0_8px_24px_rgba(99,102,241,0.25)] ring-1 ring-indigo-500/40' 
+              : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'
+          }`}
+        >
+          <FileText size={16} /> Final Output
+        </button>
                       onClick={() => { setLibraryFilter('suggested'); generateSuggestions(); }}
                       disabled={isProcessing}
                       className="flex items-center gap-2 text-xs font-bold bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 px-3 py-2 rounded-lg transition-all"
@@ -386,7 +493,7 @@ export const PromptCanvas: React.FC = () => {
                      <Sparkles size={12} /> Refine with Agent
                    </button>
                    <button 
-                      onClick={() => setShowSaveModal(true)}
+                      onClick={() => setShowSaveSheet(true)}
                       disabled={!userInstruction.trim()}
                       className="flex items-center gap-1.5 text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-md transition-colors disabled:opacity-50 font-medium"
                    >
@@ -608,32 +715,61 @@ export const PromptCanvas: React.FC = () => {
       )}
 
       {/* Save/Edit Modal */}
-      {showSaveModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <form onSubmit={handleSave} className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
-            <h3 className="text-lg font-bold text-white">{editingPrompt ? 'Edit Template' : 'Save Prompt Template'}</h3>
+      {showSaveSheet && (
+        <div className="absolute inset-y-0 right-0 z-50 w-full max-w-md bg-zinc-950 border-l border-zinc-800 shadow-2xl animate-in slide-in-from-right-4 duration-200 flex flex-col">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 bg-zinc-900/70">
             <div>
-              <label className="text-xs text-zinc-500 block mb-1.5">Template Name</label>
-              <input 
-                autoFocus
-                value={newPromptName}
-                onChange={e => setNewPromptName(e.target.value)}
-                placeholder="e.g., React Component Generator"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:border-indigo-500 outline-none"
-              />
+              <h3 className="text-lg font-bold text-white">{editingPrompt ? 'Edit Template' : 'Save Prompt Template'}</h3>
+              <p className="text-xs text-zinc-500">Name, tag, and preview your prompt before saving.</p>
             </div>
-            <div>
-              <label className="text-xs text-zinc-500 block mb-1.5 flex items-center gap-1"><Tag size={10} /> Tags (comma separated)</label>
-              <input 
-                value={newPromptTags}
-                onChange={e => setNewPromptTags(e.target.value)}
-                placeholder="react, frontend, testing"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:border-indigo-500 outline-none"
-              />
+            <button onClick={closeSaveModal} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" aria-label="Close save panel">
+              <X size={16} />
+            </button>
+          </div>
+          <form onSubmit={handleSave} className="flex-1 flex flex-col overflow-hidden">
+            <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar">
+              <div>
+                <label className="text-xs text-zinc-500 block mb-1.5">Template Name</label>
+                <input
+                  autoFocus
+                  value={newPromptName}
+                  onChange={e => setNewPromptName(e.target.value)}
+                  placeholder="e.g., React Component Generator"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:border-indigo-500 outline-none"
+                />
+                {!newPromptName.trim() && (
+                  <p className="text-[11px] text-red-300 mt-1">Name is required.</p>
+                )}
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 block mb-1.5 flex items-center gap-1"><Tag size={10} /> Tags (comma separated)</label>
+                <input
+                  value={newPromptTags}
+                  onChange={e => setNewPromptTags(e.target.value)}
+                  placeholder="react, frontend, testing"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-white focus:border-indigo-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 block mb-1.5 flex items-center gap-1"><FileText size={10} /> Preview</label>
+                <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 min-h-[140px] max-h-[260px] overflow-y-auto custom-scrollbar">
+                  <div className="text-sm font-semibold text-zinc-200 mb-1">{newPromptName || 'Untitled template'}</div>
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {newPromptTags.split(',').filter(Boolean).map(tag => (
+                      <span key={tag} className="text-[10px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded-full">#{tag.trim()}</span>
+                    ))}
+                  </div>
+                  <pre className="text-[12px] leading-relaxed text-zinc-300 font-mono whitespace-pre-wrap">{userInstruction || '(No instruction provided)'}</pre>
+                </div>
+              </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={closeSaveModal} className="px-4 py-2 text-sm text-zinc-400 hover:text-white">Cancel</button>
-              <button type="submit" disabled={!newPromptName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-500 disabled:opacity-50">
+            <div className="p-4 border-t border-zinc-800 bg-zinc-900/60 flex justify-end gap-2">
+              <button type="button" onClick={closeSaveModal} className="px-4 py-2 text-sm text-zinc-400 hover:text-white transition-colors">Cancel</button>
+              <button
+                type="submit"
+                disabled={!newPromptName.trim()}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
+              >
                 {editingPrompt ? 'Update' : 'Save Template'}
               </button>
             </div>

@@ -45,6 +45,8 @@ interface AppContextType {
   compilePrompt: () => void;
   contextMode: ContextMode;
   setContextMode: (m: ContextMode) => void;
+  beginnerMode: boolean;
+  setBeginnerMode: (v: boolean) => void;
   
   // Prompt Library
   savedPrompts: PromptTemplate[];
@@ -92,10 +94,37 @@ interface AppContextType {
 
   // Smart helpers
   smartSelectFiles: (instruction?: string) => Promise<void>;
-  autoRefineInstruction: () => Promise<void>;
+  autoRefineInstruction: () => Promise<string | undefined>;
+  simpleFlowRunning: boolean;
+  simpleFlow: SimpleFlowState;
+  runSimpleFlow: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+type StepStatus = 'idle' | 'running' | 'done' | 'error';
+
+interface SimpleFlowState {
+  status: {
+    smartSelect: StepStatus;
+    refine: StepStatus;
+    build: StepStatus;
+  };
+  error?: string;
+  codemapPrompt: string;
+  implementationPrompt: string;
+}
+
+const initialSimpleFlowState: SimpleFlowState = {
+  status: {
+    smartSelect: 'idle',
+    refine: 'idle',
+    build: 'idle',
+  },
+  error: undefined,
+  codemapPrompt: '',
+  implementationPrompt: '',
+};
 
 // --- TOOLS ---
 const SYSTEM_INSTRUCTION = `
@@ -177,6 +206,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [userInstruction, setUserInstruction] = useState<string>("");
   const [generatedPrompt, setGeneratedPrompt] = useState<string>("");
   const [contextMode, setContextMode] = useState<ContextMode>('reference');
+  const [beginnerMode, setBeginnerMode] = useState<boolean>(false);
   
   // Library
   const [savedPrompts, setSavedPrompts] = useState<PromptTemplate[]>([]);
@@ -227,6 +257,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAgentOpen, setIsAgentOpen] = useState(false); // Default false for mobile safety
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [bypassLanding, setBypassLanding] = useState(false);
+  const [simpleFlowRunning, setSimpleFlowRunning] = useState(false);
+  const [simpleFlow, setSimpleFlow] = useState<SimpleFlowState>(initialSimpleFlowState);
   
   // Helpers
   const addToast = useCallback((message: string, type: 'success'|'error'|'info' = 'info') => {
@@ -282,12 +314,126 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const refined = await generateRefinedPrompt(currentInstruction, Array.from(selectedPathsRef.current));
       setUserInstruction(refined);
       addToast('Instruction refined', 'success');
+      return refined;
     } catch (e: any) {
       addToast(`Refine failed: ${e.message}`, 'error');
     } finally {
       setIsProcessing(false);
     }
   }, [addToast]);
+
+  const buildSimplePrompts = useCallback((instruction: string): { codemapPrompt: string; implementationPrompt: string } => {
+    const codemapPrompt = `You are Windsurf Codemap Builder. Create a concise codemap for this repo focused on upcoming changes. 
+Goals:
+- Identify files, components, and data flows relevant to the requested work.
+- Highlight entry points, state/store wiring, services, and UI components touched.
+- Include paths with brief purpose; keep it scannable.
+- Prefer tree + notes format.
+
+Output format (single markdown block):
+# Codemap
+- Key files:
+  - path: short purpose
+- Data/State:
+  - item: short note
+- Flows:
+  - step list for how the feature works today
+- Risks/Gaps:
+  - bullets
+
+If any area is unknown, say “Unknown: <item>” instead of guessing.`;
+
+    const implementationPrompt = `You are an expert AI pair-programmer. Use the Codemap(s) before coding.
+
+Codemap(s):
+[PASTE CODEMAP SUMMARY HERE]
+
+Goal:
+${instruction}
+
+Add a “Simple/Auto mode” that guides beginners:
+- Toggle in PromptCanvas header switches Manual vs Simple mode.
+- In Simple mode, a one-click “Make my prompt” runs:
+  1) smartSelectFiles on the user’s idea
+  2) autoRefineInstruction
+  3) Show refined prompt in Preview with a big Copy button
+- Keep manual controls available.
+- Inline status + error surface for each step.
+- Starter presets for common intents (e.g., Fix bug, Add component, Refactor, Write tests) that prefill the instruction and trigger the flow.
+
+Key implementation notes:
+- Reuse store smart helpers: smartSelectFiles, autoRefineInstruction.
+- Add beginnerMode + step status in store state; ensure agentActivity gating keeps buttons disabled while busy.
+- PromptCanvas: add toggle, checklist/status, single CTA to run pipeline, preview copy surface.
+- AgentInterface: optional auto-send of refined prompt is user-controlled; default off.
+- Keep UX minimal, no breaking changes to existing Manual mode.
+
+Constraints:
+- Preserve existing styles.
+- Handle failures gracefully with retry and manual override.
+- No hardcoded API keys; use existing env wiring.
+
+Deliverables:
+- Updated components and store with the described Simple mode.
+- (If time) starter presets wired to the pipeline.
+
+Before coding: read the Codemap(s).
+Then implement and summarize changes + quick tests run.`;
+
+    return { codemapPrompt, implementationPrompt };
+  }, []);
+
+  const runSimpleFlow = useCallback(async () => {
+    const effectiveInstruction = (userInstructionRef.current || '').trim();
+    if (!effectiveInstruction) {
+      addToast('Add an instruction first to run Simple mode', 'error');
+      return;
+    }
+
+    setSimpleFlowRunning(true);
+    setSimpleFlow({
+      ...initialSimpleFlowState,
+      status: { smartSelect: 'running', refine: 'idle', build: 'idle' },
+    });
+
+    try {
+      await smartSelectFiles(effectiveInstruction);
+      setSimpleFlow(prev => ({
+        ...prev,
+        status: { ...prev.status, smartSelect: 'done' },
+      }));
+
+      const refined = await autoRefineInstruction();
+      if (!refined) {
+        throw new Error('Refine step failed');
+      }
+      setSimpleFlow(prev => ({
+        ...prev,
+        status: { ...prev.status, refine: 'done' },
+      }));
+
+      const prompts = buildSimplePrompts(refined);
+      setSimpleFlow(prev => ({
+        ...prev,
+        status: { ...prev.status, build: 'done' },
+        codemapPrompt: prompts.codemapPrompt,
+        implementationPrompt: prompts.implementationPrompt,
+        error: undefined,
+      }));
+    } catch (e: any) {
+      setSimpleFlow(prev => ({
+        ...prev,
+        error: e?.message || 'Simple flow failed',
+        status: {
+          smartSelect: prev.status.smartSelect === 'running' ? 'error' : prev.status.smartSelect,
+          refine: prev.status.refine === 'running' ? 'error' : prev.status.refine,
+          build: 'error',
+        },
+      }));
+    } finally {
+      setSimpleFlowRunning(false);
+    }
+  }, [addToast, smartSelectFiles, autoRefineInstruction, buildSimplePrompts]);
 
   const savePrompt = useCallback((name: string, content: string, tags: string[] = ['custom']) => {
     const newPrompt: PromptTemplate = {
@@ -651,6 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userInstruction, setUserInstruction,
       generatedPrompt, setGeneratedPrompt, compilePrompt,
       contextMode, setContextMode,
+      beginnerMode, setBeginnerMode,
       savedPrompts, suggestedTemplates, savePrompt, deletePrompt, updatePrompt,
       generateSuggestions, saveSuggestedTemplate,
       agentActivity, chatMessages, startAgent, sendMessage, stopAgent, clearChat,
@@ -663,7 +810,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       bypassLanding, setBypassLanding,
       projectMetadata, refreshProject,
       isExportOpen, setIsExportOpen,
-      smartSelectFiles, autoRefineInstruction
+      smartSelectFiles, autoRefineInstruction,
+      simpleFlowRunning, simpleFlow, runSimpleFlow
     }}>
       {children}
     </AppContext.Provider>
